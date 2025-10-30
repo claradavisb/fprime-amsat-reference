@@ -182,7 +182,7 @@ module CDHDeployment {
       # - chronoTime connections for timestamps (via time connections pattern)
       # - prmDb connections for parameters (via param connections pattern)
       
-      usbSoundCard.tlmOut -> tlmSend.TlmRecv
+      # usbSoundCard.tlmOut -> tlmSend.TlmRecv
 
       # Future connections for command forwarding (add when implementing APRS/DTMF command parsing):
       # usbSoundCard.cmdSendOut -> cmdDisp.seqCmdBuff

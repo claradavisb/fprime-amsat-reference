@@ -5,7 +5,6 @@
 // ======================================================================
 
 #include "Components/USBSoundCard/USBSoundCard.hpp"
-#include <alsa/asoundlib.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -13,76 +12,8 @@
 #include <unistd.h>
 #include <cmath>
 #include <cstring>
-
-#ifdef ALSA_STUBBED
-// Stub ALSA functions for cross-compilation
-#define SND_PCM_STREAM_CAPTURE 1
-#define SND_PCM_FORMAT_S16_LE 2
-
-struct snd_pcm_hw_params_t;
-
-static inline int snd_pcm_open(snd_pcm_t **pcm, const char *name, int stream, int mode) {
-    printf("[USB_SOUND] STUB: snd_pcm_open called (ALSA not available during cross-compilation)\n");
-    return -1;
-}
-
-static inline int snd_pcm_close(snd_pcm_t *pcm) {
-    printf("[USB_SOUND] STUB: snd_pcm_close called\n");
-    return 0;
-}
-
-static inline void snd_pcm_hw_params_alloca(snd_pcm_hw_params_t **ptr) {
-    printf("[USB_SOUND] STUB: snd_pcm_hw_params_alloca called\n");
-    *ptr = nullptr;
-}
-
-static inline int snd_pcm_hw_params_any(snd_pcm_t *pcm, snd_pcm_hw_params_t *params) {
-    printf("[USB_SOUND] STUB: snd_pcm_hw_params_any called\n");
-    return -1;
-}
-
-static inline int snd_pcm_hw_params_set_format(snd_pcm_t *pcm, snd_pcm_hw_params_t *params, int format) {
-    printf("[USB_SOUND] STUB: snd_pcm_hw_params_set_format called\n");
-    return -1;
-}
-
-static inline int snd_pcm_hw_params_set_rate_near(snd_pcm_t *pcm, snd_pcm_hw_params_t *params, unsigned int *val, int *dir) {
-    printf("[USB_SOUND] STUB: snd_pcm_hw_params_set_rate_near called\n");
-    return -1;
-}
-
-static inline int snd_pcm_hw_params_set_channels(snd_pcm_t *pcm, snd_pcm_hw_params_t *params, unsigned int val) {
-    printf("[USB_SOUND] STUB: snd_pcm_hw_params_set_channels called\n");
-    return -1;
-}
-
-static inline int snd_pcm_hw_params(snd_pcm_t *pcm, snd_pcm_hw_params_t *params) {
-    printf("[USB_SOUND] STUB: snd_pcm_hw_params called\n");
-    return -1;
-}
-
-static inline int snd_pcm_prepare(snd_pcm_t *pcm) {
-    printf("[USB_SOUND] STUB: snd_pcm_prepare called\n");
-    return -1;
-}
-
-static inline int snd_pcm_readi(snd_pcm_t *pcm, const void *buffer, unsigned long size) {
-    printf("[USB_SOUND] STUB: snd_pcm_readi called\n");
-    return -1;
-}
-
-static inline int snd_pcm_recover(snd_pcm_t *pcm, int err, int silent) {
-    printf("[USB_SOUND] STUB: snd_pcm_recover called\n");
-    return -1;
-}
-
-static inline const char* snd_strerror(int errnum) {
-    return "ALSA stubbed out during cross-compilation";
-}
-
-#else
-#include <alsa/asoundlib.h>
-#endif
+#include <errno.h>
+#include <sys/stat.h>
 
 namespace Components {
 
@@ -92,54 +23,43 @@ namespace Components {
 
 USBSoundCard::USBSoundCard(const char *const compName)
     : USBSoundCardComponentBase(compName),
-      m_audioCapturing(false),
       m_transmissionActive(false),
-      m_audioDevice(nullptr),
-      m_audioBuffer(nullptr),
-      m_bufferSize(1024),
-      m_framesProcessed(0),
-      m_packetsTransmitted(0),
       m_packetSequence(0),
-      m_aprsListenSocket(-1),
-      m_aprsServerActive(false),
-      m_aprsPacketCount(0)
+      m_packetsTransmitted(0),
+      m_direwolfPipe(-1),
+      m_direwolfActive(false),
+      m_aprsPacketCount(0),
+      m_lineBufferPos(0)
 {
-    // Initialize audio buffer
-    m_audioBuffer = new short[m_bufferSize];
-    
     // Initialize transmission buffer
     initializeTransmissionBuffer();
     
-    // Initialize APRS server
-    initializeAprsServer();
+    // Initialize Direwolf pipe
+    initializeDirewolfPipe();
+    
+    // Clear line buffer
+    memset(m_lineBuffer, 0, sizeof(m_lineBuffer));
 }
 
 USBSoundCard::~USBSoundCard() {
-    if (m_audioCapturing) {
-        stopAudioCapture();
+    // Clean up Direwolf pipe
+    if (m_direwolfPipe >= 0) {
+        close(m_direwolfPipe);
     }
-    
-    // Clean up APRS server
-    if (m_aprsServerActive && m_aprsListenSocket >= 0) {
-        close(m_aprsListenSocket);
-    }
-    
-    delete[] m_audioBuffer;
 }
 
-// ----------------------------------------------------------------------
-// Handler implementations for commands
-// ----------------------------------------------------------------------
 
 void USBSoundCard::START_CAPTURE_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) {
-    if (m_audioCapturing) {
+
+    if (m_direwolfActive) {
         this->log_WARNING_HI_AUDIO_CAPTURE_ALREADY_STARTED();
         this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
         return;
     }
     
-    if (initializeAudioDevice()) {
-        m_audioCapturing = true;
+    initializeDirewolfPipe();
+    
+    if (m_direwolfActive) {
         this->log_ACTIVITY_LO_AUDIO_CAPTURE_STARTED();
         this->tlmWrite_DEVICE_CONNECTED(true);
         this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
@@ -151,13 +71,17 @@ void USBSoundCard::START_CAPTURE_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) {
 }
 
 void USBSoundCard::STOP_CAPTURE_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) {
-    if (!m_audioCapturing) {
+    if (!m_direwolfActive) {
         this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::EXECUTION_ERROR);
         return;
     }
     
-    stopAudioCapture();
-    m_audioCapturing = false;
+    if (m_direwolfPipe >= 0) {
+        close(m_direwolfPipe);
+        m_direwolfPipe = -1;
+    }
+    
+    m_direwolfActive = false;
     this->log_ACTIVITY_LO_AUDIO_CAPTURE_STOPPED();
     this->tlmWrite_DEVICE_CONNECTED(false);
     this->cmdResponse_out(opCode, cmdSeq, Fw::CmdResponse::OK);
@@ -196,270 +120,265 @@ void USBSoundCard::SEND_TEST_PACKET_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) 
     }
 }
 
-// ----------------------------------------------------------------------
-// Handler implementations for input ports
-// ----------------------------------------------------------------------
 
 void USBSoundCard::run_handler(FwIndexType portNum, U32 context) {
-    // This gets called periodically by the rate group
-    if (m_audioCapturing) {
-        processAudioData();
-    }
-    
-    // Check for APRS connections
-    checkAprsConnections();
+    // Read from Direwolf pipe
+    readDirewolfOutput();
 }
 
-// ----------------------------------------------------------------------
-// Private helper methods
-// ----------------------------------------------------------------------
-
-bool USBSoundCard::initializeAudioDevice() {
-    int err;
+void USBSoundCard::initializeDirewolfPipe() {
+    const char* pipePath = "/tmp/direwolf_output";
     
-    printf("[USB_SOUND] Attempting to open USB sound card...\n");
-    
-    // Try multiple device names for USB sound card
-    const char* deviceNames[] = {
-        "hw:1,0",                    // Most common USB device
-        "plughw:CARD=Device,DEV=0",  // ALSA plugin wrapper
-        "hw:CARD=Device,DEV=0",      // Direct hardware access
-        "default"                    // System default
-    };
-    
-    for (size_t i = 0; i < sizeof(deviceNames)/sizeof(deviceNames[0]); i++) {
-        printf("[USB_SOUND] Trying device: %s\n", deviceNames[i]);
-        err = snd_pcm_open(&m_audioDevice, deviceNames[i], SND_PCM_STREAM_CAPTURE, 0);
-        if (err >= 0) {
-            printf("[USB_SOUND] Successfully opened device: %s\n", deviceNames[i]);
-            break;
-        }
-        printf("[USB_SOUND] Failed to open %s: %s\n", deviceNames[i], snd_strerror(err));
-    }
-    
-    if (err < 0) {
-        printf("[USB_SOUND] ERROR: Could not open any audio device\n");
-        return false;
-    }
-    
-    // Set hardware parameters
-    snd_pcm_hw_params_t *params;
-    snd_pcm_hw_params_alloca(&params);
-    snd_pcm_hw_params_any(m_audioDevice, params);
-    
-    // Set format to 16-bit signed PCM
-    err = snd_pcm_hw_params_set_format(m_audioDevice, params, SND_PCM_FORMAT_S16_LE);
-    if (err < 0) {
-        printf("[USB_SOUND] ERROR: Cannot set format: %s\n", snd_strerror(err));
-        snd_pcm_close(m_audioDevice);
-        return false;
-    }
-    
-    // Set sample rate to 44.1kHz
-    unsigned int sampleRate = 44100;
-    err = snd_pcm_hw_params_set_rate_near(m_audioDevice, params, &sampleRate, 0);
-    if (err < 0) {
-        printf("[USB_SOUND] ERROR: Cannot set sample rate: %s\n", snd_strerror(err));
-        snd_pcm_close(m_audioDevice);
-        return false;
-    }
-    printf("[USB_SOUND] Sample rate set to: %u Hz\n", sampleRate);
-    
-    // Set to mono (1 channel)
-    err = snd_pcm_hw_params_set_channels(m_audioDevice, params, 1);
-    if (err < 0) {
-        printf("[USB_SOUND] ERROR: Cannot set channels: %s\n", snd_strerror(err));
-        snd_pcm_close(m_audioDevice);
-        return false;
-    }
-    
-    // Apply parameters
-    err = snd_pcm_hw_params(m_audioDevice, params);
-    if (err < 0) {
-        printf("[USB_SOUND] ERROR: Cannot set hardware parameters: %s\n", snd_strerror(err));
-        snd_pcm_close(m_audioDevice);
-        return false;
-    }
-    
-    // Prepare the device
-    err = snd_pcm_prepare(m_audioDevice);
-    if (err < 0) {
-        printf("[USB_SOUND] ERROR: Cannot prepare device: %s\n", snd_strerror(err));
-        snd_pcm_close(m_audioDevice);
-        return false;
-    }
-    
-    printf("[USB_SOUND] Audio device initialized successfully\n");
-    return true;
-}
-
-void USBSoundCard::stopAudioCapture() {
-    if (m_audioDevice) {
-        snd_pcm_close(m_audioDevice);
-        m_audioDevice = nullptr;
-    }
-}
-
-void USBSoundCard::processAudioData() {
-    if (!m_audioDevice) {
+    // Check if pipe exists
+    struct stat st;
+    if (stat(pipePath, &st) != 0) {
+        printf("[DIREWOLF] Pipe %s does not exist (Direwolf not running?)\n", pipePath);
+        m_direwolfActive = false;
         return;
     }
     
-    // Read audio data
-    int frames = snd_pcm_readi(m_audioDevice, m_audioBuffer, m_bufferSize);
+    // Open in non-blocking mode
+    m_direwolfPipe = open(pipePath, O_RDONLY | O_NONBLOCK);
     
-    if (frames < 0) {
-        // Handle underrun or other errors
-        printf("Audio read error: %s\n", snd_strerror(frames));
-        snd_pcm_recover(m_audioDevice, frames, 0);
-        return;
-    }
-    
-    if (frames == 0) {
-        printf("No audio frames read\n");
-        return;
-    }
-    
-    // Calculate audio level (RMS)
-    long sum = 0;
-    short maxSample = 0;
-    for (int i = 0; i < frames; i++) {
-        sum += (long)m_audioBuffer[i] * m_audioBuffer[i];
-        if (abs(m_audioBuffer[i]) > abs(maxSample)) {
-            maxSample = m_audioBuffer[i];
-        }
-    }
-    
-    if (frames > 0) {
-        double rms = sqrt((double)sum / frames);
-        U32 audioLevel = (U32)(rms / 32767.0 * 255.0); // Scale to 0-255
-        
-        // Send telemetry
-        this->tlmWrite_AUDIO_INPUT_LEVEL(audioLevel);
-        m_framesProcessed++;
-        this->tlmWrite_FRAMES_PROCESSED(m_framesProcessed);
-        
-        // Transmit audio data if transmission is active
-        if (m_transmissionActive) {
-            U32 dataSize = frames * sizeof(short);
-            if (transmitAudioPacket(m_audioBuffer, dataSize)) {
-                // Update transmission telemetry
-                Fw::Time currentTime = this->getTime();
-                this->tlmWrite_LAST_TRANSMISSION_TIME(currentTime.getSeconds());
-            }
-        }
-        
-        // Debug print every 10th call to avoid spam
-        static U32 debugCounter = 0;
-        if (++debugCounter % 10 == 0) {
-            printf("Frames: %d, RMS Level: %u, Max Sample: %d\n", frames, audioLevel, maxSample);
-        }
-        
-        // Log warning if audio level is too high
-        if (audioLevel > 200) {
-            static U32 lastWarningTime = 0;
-            Fw::Time currentTime = this->getTime();
-            
-            // Only warn once per second to avoid spam
-            if (currentTime.getSeconds() > lastWarningTime) {
-                this->log_WARNING_LO_AUDIO_LEVEL_HIGH();
-                lastWarningTime = currentTime.getSeconds();
-            }
-        }
-    }
-}
-
-U32 USBSoundCard::calculateAudioLevel(const short* buffer, int frames) {
-    if (frames <= 0) {
-        return 0;
-    }
-    
-    long sum = 0;
-    for (int i = 0; i < frames; i++) {
-        sum += (long)buffer[i] * buffer[i];
-    }
-    
-    double rms = sqrt((double)sum / frames);
-    return (U32)(rms / 32767.0 * 255.0); // Scale to 0-255
-}
-
-void USBSoundCard::initializeTransmissionBuffer() {
-    // Allocate buffer for transmission (audio data + header)
-    const U32 maxAudioSize = m_bufferSize * sizeof(short);
-    const U32 headerSize = sizeof(U32) * 3; // sequence, timestamp, data size
-    const U32 totalSize = headerSize + maxAudioSize;
-    
-    // Allocate buffer memory
-    U8* bufferData = new U8[totalSize];
-    m_transmissionBuffer.setData(bufferData);
-    m_transmissionBuffer.setSize(totalSize);
-}
-
-bool USBSoundCard::transmitAudioPacket(const void* audioData, U32 dataSize) {
-    if (!m_transmissionActive) {
-        return false;
-    }
-    
-    try {
-        // Get current timestamp
-        Fw::Time currentTime = this->getTime();
-        
-        // Prepare packet header
-        U8* bufferPtr = m_transmissionBuffer.getData();
-        U32* header = reinterpret_cast<U32*>(bufferPtr);
-        
-        header[0] = m_packetSequence++;  // Sequence number
-        header[1] = currentTime.getSeconds();  // Timestamp seconds
-        header[2] = dataSize;  // Audio data size
-        
-        // Copy audio data after header
-        U8* audioPtr = bufferPtr + sizeof(U32) * 3;
-        std::memcpy(audioPtr, audioData, dataSize);
-        
-        // Set buffer size to actual data size
-        U32 totalPacketSize = sizeof(U32) * 3 + dataSize;
-        m_transmissionBuffer.setSize(totalPacketSize);
-        
-        // Send packet via buffer output port
-        this->bufferOut_out(0, m_transmissionBuffer);
-        
-        // Update telemetry
-        m_packetsTransmitted++;
-        this->tlmWrite_PACKETS_TRANSMITTED(m_packetsTransmitted);
-        
-        // Log transmission event
-        this->log_ACTIVITY_LO_PACKET_TRANSMITTED();
-        
-        return true;
-        
-    } catch (...) {
-        this->log_WARNING_HI_TRANSMISSION_ERROR();
-        return false;
-    }
-}
-
-bool USBSoundCard::sendTestPacket() {
-    // Create test audio data (sine wave pattern)
-    const U32 testDataSize = 256; // 128 samples * 2 bytes per sample
-    short testAudioData[128];
-    
-    // Generate a simple sine wave pattern
-    for (int i = 0; i < 128; i++) {
-        double frequency = 440.0; // A4 note
-        double sampleRate = 44100.0;
-        testAudioData[i] = (short)(32767.0 * sin(2.0 * M_PI * frequency * i / sampleRate));
-    }
-    
-    // Transmit test packet
-    bool success = transmitAudioPacket(testAudioData, testDataSize);
-    
-    if (success) {
-        printf("[USB_SOUND] Test packet transmitted successfully\n");
+    if (m_direwolfPipe >= 0) {
+        m_direwolfActive = true;
+        m_lineBufferPos = 0;
+        printf("[DIREWOLF] Connected to Direwolf pipe at %s\n", pipePath);
     } else {
-        printf("[USB_SOUND] Failed to transmit test packet\n");
+        printf("[DIREWOLF] Failed to open pipe: %s (errno=%d)\n", strerror(errno), errno);
+        m_direwolfActive = false;
+    }
+}
+
+void USBSoundCard::readDirewolfOutput() {
+    if (!m_direwolfActive) {
+        // Retry opening pipe periodically (every ~10 seconds at 10Hz rate)
+        static U32 retryCounter = 0;
+        if (++retryCounter % 100 == 0) {
+            initializeDirewolfPipe();
+        }
+        return;
     }
     
-    return success;
+    char buffer[1024];
+    ssize_t bytesRead = read(m_direwolfPipe, buffer, sizeof(buffer) - 1);
+    
+    if (bytesRead > 0) {
+        buffer[bytesRead] = '\0';
+        
+        // Process character by character to handle line boundaries
+        for (ssize_t i = 0; i < bytesRead; i++) {
+            char c = buffer[i];
+            
+            if (c == '\n' || c == '\r') {
+                if (m_lineBufferPos > 0) {
+                    m_lineBuffer[m_lineBufferPos] = '\0';
+                    parseDirewolfLine(m_lineBuffer);
+                    m_lineBufferPos = 0;
+                }
+            } else {
+                if (m_lineBufferPos < sizeof(m_lineBuffer) - 1) {
+                    m_lineBuffer[m_lineBufferPos++] = c;
+                } else {
+                    // Line too long, reset
+                    printf("[DIREWOLF] Line buffer overflow, resetting\n");
+                    m_lineBufferPos = 0;
+                }
+            }
+        }
+    } else if (bytesRead == 0) {
+        // Pipe closed (Direwolf stopped), attempt to reconnect
+        close(m_direwolfPipe);
+        m_direwolfPipe = -1;
+        m_direwolfActive = false;
+        printf("[DIREWOLF] Pipe closed, will attempt to reconnect\n");
+    } else {
+        // Error reading
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            printf("[DIREWOLF] Read error: %s\n", strerror(errno));
+            close(m_direwolfPipe);
+            m_direwolfPipe = -1;
+            m_direwolfActive = false;
+        }
+    }
+}
+
+void USBSoundCard::parseDirewolfLine(const char* line) {
+    printf("[DIREWOLF] Received: %s\n", line);
+    
+    // Direwolf text output format examples:
+    // [0] AMSAT-11>APDIGI:=3902.38N\07704.40W
+    // [0.3] AMSAT-11>APDIGI:>MODE=a
+    // [0] AMSAT-11>APDIGI:>BAT=12.6 TEMP=22.1
+    
+    const char* payload = strchr(line, ':');
+    if (!payload) {
+        return;
+    }
+    payload++; // Skip the ':'
+    
+    // Extract callsign (between ']' and '>')
+    const char* callsignStart = strchr(line, ']');
+    if (callsignStart) {
+        callsignStart++; // Skip ']'
+        while (*callsignStart == ' ') callsignStart++; // Skip spaces
+        
+        const char* callsignEnd = strchr(callsignStart, '>');
+        if (callsignEnd) {
+            char callsign[16] = {0};
+            size_t len = callsignEnd - callsignStart;
+            if (len < sizeof(callsign)) {
+                strncpy(callsign, callsignStart, len);
+                callsign[len] = '\0';
+                
+                logAprsPacketReceived(callsign);
+            }
+        }
+    }
+    
+    if (strstr(payload, "MODE=") != nullptr) {
+        const char* modePtr = strstr(payload, "MODE=");
+        if (modePtr[5] != '\0') {
+            char mode = modePtr[5];
+            handleModeCommand(mode);
+        }
+        return;
+    }
+    
+    if (payload[0] == '=' || payload[0] == '!' || payload[0] == '/') {
+        parseAprsPosition(payload);
+        return;
+    }
+    
+    // Check for telemetry in comment field
+    if (payload[0] == '>') {
+        parseAprsTelemetry(payload + 1);
+        return;
+    }
+}
+
+void USBSoundCard::parseAprsPosition(const char* position) {
+    // APRS position format: =DDMM.MMN\DDDMM.MMW or =DDMM.MMN/DDDMM.MMW
+    // Example: =3902.38N\07704.40W
+    
+    F32 lat = 0, lon = 0;
+    
+    // Skip position symbol (=, !, /)
+    const char* p = position + 1;
+    
+    // Parse latitude: DDMM.MM
+    if (strlen(p) < 8) {
+        logAprsParseError("Position string too short");
+        return;
+    }
+    
+    int latDeg = (p[0] - '0') * 10 + (p[1] - '0');
+    float latMin = atof(&p[2]);
+    lat = latDeg + (latMin / 60.0);
+    
+    // Check N/S
+    const char* nsPtr = strchr(p, 'N');
+    bool south = false;
+    if (!nsPtr) {
+        nsPtr = strchr(p, 'S');
+        south = true;
+    }
+    if (south) lat = -lat;
+    
+    // Parse longitude: DDDMM.MM
+    const char* lonStart = strchr(p, '\\');
+    if (!lonStart) lonStart = strchr(p, '/');
+    
+    if (lonStart) {
+        lonStart++;
+        if (strlen(lonStart) < 9) {
+            logAprsParseError("Longitude string too short");
+            return;
+        }
+        
+        int lonDeg = (lonStart[0] - '0') * 100 + (lonStart[1] - '0') * 10 + (lonStart[2] - '0');
+        float lonMin = atof(&lonStart[3]);
+        lon = lonDeg + (lonMin / 60.0);
+        
+        // Check E/W
+        const char* ewPtr = strchr(lonStart, 'W');
+        bool west = false;
+        if (!ewPtr) {
+            ewPtr = strchr(lonStart, 'E');
+        } else {
+            west = true;
+        }
+        if (west) lon = -lon;
+    }
+    
+    // Send to telemetry
+    sendAprsLatitude(lat);
+    sendAprsLongitude(lon);
+    logAprsPositionUpdate(lat, lon);
+    
+    printf("[APRS] Position parsed: LAT=%.6f, LON=%.6f\n", lat, lon);
+}
+
+void USBSoundCard::parseAprsTelemetry(const char* telemetry) {
+    
+    const char* batPtr = strstr(telemetry, "BAT=");
+    const char* tempPtr = strstr(telemetry, "TEMP=");
+    const char* sigPtr = strstr(telemetry, "SIG=");
+    
+    F32 bat = 0, temp = 0, sig = 0;
+    bool hasBat = false, hasTemp = false, hasSig = false;
+    
+    if (batPtr) {
+        bat = atof(batPtr + 4);
+        sendAprsBattery(bat);
+        hasBat = true;
+    }
+    
+    if (tempPtr) {
+        temp = atof(tempPtr + 5);
+        sendAprsTemperature(temp);
+        hasTemp = true;
+    }
+    
+    if (sigPtr) {
+        sig = atof(sigPtr + 4);
+        sendAprsSignalStrength(sig);
+        hasSig = true;
+    }
+    
+    if (hasBat && hasTemp) {
+        logAprsTelemetryUpdate(bat, temp);
+    }
+    
+    printf("[APRS] Telemetry parsed: BAT=%.2f TEMP=%.2f SIG=%.2f\n", bat, temp, sig);
+}
+
+void USBSoundCard::handleModeCommand(char mode) {
+    printf("[APRS] Mode command received: %c\n", mode);
+
+    U32 modeNum = 0;
+    const char* modeName = "";
+    
+    switch(mode) {
+        case 'a': modeNum = 1; modeName = "APRS"; break;
+        case 'f': modeNum = 2; modeName = "FSK"; break;
+        case 'b': modeNum = 3; modeName = "BPSK"; break;
+        case 's': modeNum = 4; modeName = "SSTV"; break;
+        case 'm': modeNum = 5; modeName = "CW"; break;
+        case 'o': modeNum = 10; modeName = "BEACON_TOGGLE"; break;
+        case 'e': modeNum = 6; modeName = "REPEATER"; break;
+        case 'n': modeNum = 7; modeName = "TX_COMMANDS"; break;
+        default:
+            printf("[APRS] Unknown mode: %c\n", mode);
+            logAprsParseError("Unknown mode command");
+            return;
+    }
+    
+    printf("[APRS] Executing mode change to %s (%u)\n", modeName, modeNum);
+    Fw::LogStringArg modeArg(modeName);
+    
+    // TODO: Send command via F Prime output port to other components
+
 }
 
 // ----------------------------------------------------------------------
@@ -495,7 +414,6 @@ void USBSoundCard::logAprsPacketReceived(const char* callsign) {
     m_aprsPacketCount++;
     this->tlmWrite_APRS_PACKET_COUNT(m_aprsPacketCount);
     
-    // Convert const char* to Fw::LogStringArg for F Prime logging
     Fw::LogStringArg callsignArg(callsign);
     this->log_ACTIVITY_LO_APRS_PACKET_RECEIVED(callsignArg);
     printf("[APRS] Packet #%u received from %s\n", m_aprsPacketCount, callsign);
@@ -512,115 +430,75 @@ void USBSoundCard::logAprsTelemetryUpdate(F32 battery, F32 temp) {
 }
 
 void USBSoundCard::logAprsParseError(const char* error) {
-    // Convert const char* to Fw::LogStringArg for F Prime logging
     Fw::LogStringArg errorArg(error);
     this->log_WARNING_HI_APRS_PARSE_ERROR(errorArg);
     printf("[APRS] Parse error: %s\n", error);
 }
 
-// ----------------------------------------------------------------------
-// APRS Interface Methods
-// ----------------------------------------------------------------------
 
-void USBSoundCard::initializeAprsServer() {
-    m_aprsListenSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_aprsListenSocket < 0) {
-        printf("[APRS] Failed to create APRS server socket\n");
-        return;
-    }
+void USBSoundCard::initializeTransmissionBuffer() {
+    const U32 maxAudioSize = 1024 * sizeof(short);
+    const U32 headerSize = sizeof(U32) * 3;
+    const U32 totalSize = headerSize + maxAudioSize;
     
-    // Set socket to non-blocking
-    int flags = fcntl(m_aprsListenSocket, F_GETFL, 0);
-    fcntl(m_aprsListenSocket, F_SETFL, flags | O_NONBLOCK);
-    
-    // Allow address reuse
-    int opt = 1;
-    setsockopt(m_aprsListenSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8080);  // APRS command port
-    
-    if (bind(m_aprsListenSocket, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        printf("[APRS] Failed to bind APRS server socket to port 8080\n");
-        close(m_aprsListenSocket);
-        return;
-    }
-    
-    if (listen(m_aprsListenSocket, 3) < 0) {
-        printf("[APRS] Failed to listen on APRS server socket\n");
-        close(m_aprsListenSocket);
-        return;
-    }
-    
-    m_aprsServerActive = true;
-    printf("[APRS] APRS command server listening on port 8080\n");
+    U8* bufferData = new U8[totalSize];
+    m_transmissionBuffer.setData(bufferData);
+    m_transmissionBuffer.setSize(totalSize);
 }
 
-void USBSoundCard::checkAprsConnections() {
-    if (!m_aprsServerActive) {
-        return;
+bool USBSoundCard::transmitAudioPacket(const void* audioData, U32 dataSize) {
+    if (!m_transmissionActive) {
+        return false;
     }
     
-    struct sockaddr_in address;
-    socklen_t addrlen = sizeof(address);
-    
-    int clientSocket = accept(m_aprsListenSocket, (struct sockaddr*)&address, &addrlen);
-    if (clientSocket >= 0) {
-        printf("[APRS] APRS client connected from %s\n", inet_ntoa(address.sin_addr));
+    try {
+        Fw::Time currentTime = this->getTime();
         
-        // Read command from client
-        char buffer[1024];
-        int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
+        U8* bufferPtr = m_transmissionBuffer.getData();
+        U32* header = reinterpret_cast<U32*>(bufferPtr);
         
-        if (bytesRead > 0) {
-            buffer[bytesRead] = '\0';
-            processAprsCommand(buffer);
-        }
+        header[0] = m_packetSequence++;
+        header[1] = currentTime.getSeconds();
+        header[2] = dataSize;
         
-        close(clientSocket);
+        U8* audioPtr = bufferPtr + sizeof(U32) * 3;
+        std::memcpy(audioPtr, audioData, dataSize);
+        
+        U32 totalPacketSize = sizeof(U32) * 3 + dataSize;
+        m_transmissionBuffer.setSize(totalPacketSize);
+        
+        this->bufferOut_out(0, m_transmissionBuffer);
+        
+        m_packetsTransmitted++;
+        this->tlmWrite_PACKETS_TRANSMITTED(m_packetsTransmitted);
+        this->log_ACTIVITY_LO_PACKET_TRANSMITTED();
+        
+        return true;
+    } catch (...) {
+        this->log_WARNING_HI_TRANSMISSION_ERROR();
+        return false;
     }
 }
 
-void USBSoundCard::processAprsCommand(const char* command) {
-    printf("[APRS] Received command: %s\n", command);
+bool USBSoundCard::sendTestPacket() {
+    const U32 testDataSize = 256;
+    short testAudioData[128];
     
-    // Parse APRS telemetry command format:
-    // "APRS_TLM LAT=42.123456 LON=-71.123456 BAT=12.6 TEMP=22.1 CALL=AMSAT-11"
-    
-    if (strncmp(command, "APRS_TLM", 8) == 0) {
-        F32 lat = 0, lon = 0, bat = 0, temp = 0;
-        char callsign[16] = {0};
-        
-        const char* latPtr = strstr(command, "LAT=");
-        const char* lonPtr = strstr(command, "LON=");
-        const char* batPtr = strstr(command, "BAT=");
-        const char* tempPtr = strstr(command, "TEMP=");
-        const char* callPtr = strstr(command, "CALL=");
-        
-        if (latPtr) lat = atof(latPtr + 4);
-        if (lonPtr) lon = atof(lonPtr + 4);
-        if (batPtr) bat = atof(batPtr + 4);
-        if (tempPtr) temp = atof(tempPtr + 5);
-        if (callPtr) {
-            sscanf(callPtr + 5, "%15s", callsign);
-        }
-        
-        // Send telemetry to F Prime
-        if (latPtr) sendAprsLatitude(lat);
-        if (lonPtr) sendAprsLongitude(lon);
-        if (batPtr) sendAprsBattery(bat);
-        if (tempPtr) sendAprsTemperature(temp);
-        
-        // Log events
-        if (callPtr) logAprsPacketReceived(callsign);
-        if (latPtr && lonPtr) logAprsPositionUpdate(lat, lon);
-        if (batPtr && tempPtr) logAprsTelemetryUpdate(bat, temp);
-        
-        printf("[APRS] Telemetry processed: LAT=%.6f, LON=%.6f, BAT=%.1f, TEMP=%.1f from %s\n",
-               lat, lon, bat, temp, callsign);
+    for (int i = 0; i < 128; i++) {
+        double frequency = 440.0;
+        double sampleRate = 44100.0;
+        testAudioData[i] = (short)(32767.0 * sin(2.0 * M_PI * frequency * i / sampleRate));
     }
+    
+    bool success = transmitAudioPacket(testAudioData, testDataSize);
+    
+    if (success) {
+        printf("[USB_SOUND] Test packet transmitted successfully\n");
+    } else {
+        printf("[USB_SOUND] Failed to transmit test packet\n");
+    }
+    
+    return success;
 }
 
 } // namespace Components

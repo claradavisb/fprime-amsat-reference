@@ -18,24 +18,6 @@ register_fprime_module(
         "${CMAKE_CURRENT_LIST_DIR}/USBSoundCard.cpp"
 )
 
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(ALSA alsa)
-    if(ALSA_FOUND)
-        target_link_libraries(${MODULE_NAME} PRIVATE ${ALSA_LIBRARIES})
-        target_include_directories(${MODULE_NAME} PRIVATE ${ALSA_INCLUDE_DIRS})
-        target_compile_options(${MODULE_NAME} PRIVATE ${ALSA_CFLAGS_OTHER})
-        message(STATUS "Found ALSA via pkg-config")
-    else()
-        # Fallback to direct linking
-        target_link_libraries(${MODULE_NAME} PRIVATE asound)
-        message(STATUS "Using direct ALSA linking")
-    endif()
-else()
-    # Fallback to direct linking
-    target_link_libraries(${MODULE_NAME} PRIVATE asound)
-    message(STATUS "Using direct ALSA linking (no pkg-config)")
-endif()
 
 ### Unit Tests ###
 register_fprime_ut(
