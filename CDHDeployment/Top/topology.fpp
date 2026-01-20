@@ -54,7 +54,10 @@ module CDHDeployment {
     instance version
     instance linuxTimer
     instance amsatFramer
-    instance radioBridge    
+    instance radioBridge
+
+    # Add your USBSoundCard component instance
+    instance usbSoundCard
     # ----------------------------------------------------------------------
     # Pattern graph specifiers
     # ----------------------------------------------------------------------
@@ -119,6 +122,8 @@ module CDHDeployment {
       rateGroup1.RateGroupMemberOut[1] -> fileDownlink.Run
       rateGroup1.RateGroupMemberOut[2] -> systemResources.run
       rateGroup1.RateGroupMemberOut[3] -> comQueue.run
+      # Connect USBSoundCard to rate group 1 for periodic audio processing
+      rateGroup1.RateGroupMemberOut[4] -> usbSoundCard.run
 
       # Rate group 2
       rateGroupDriver.CycleOut[Ports_RateGroups.rateGroup2] -> rateGroup2.CycleIn
@@ -165,7 +170,20 @@ module CDHDeployment {
     }
 
     connections CDHDeployment {
-      # Add connections here to user-defined components
+      # USBSoundCard connections
+      
+      # Standard AC port connections (these get connected automatically by pattern graph)
+      # - cmdDisp connections for commands (via command connections pattern)
+      # - eventLogger connections for events (via event connections pattern)  
+      # - tlmSend connections for telemetry (via telemetry connections pattern)
+      # - chronoTime connections for timestamps (via time connections pattern)
+      # - prmDb connections for parameters (via param connections pattern)
+      
+      # usbSoundCard.tlmOut -> tlmSend.TlmRecv
+
+      # Future connections for command forwarding (add when implementing APRS/DTMF command parsing):
+      # usbSoundCard.cmdSendOut -> cmdDisp.seqCmdBuff
+      # cmdDisp.seqCmdStatus -> usbSoundCard.cmdResponseIn
     }
 
     connections RadioBridge {
