@@ -17,10 +17,6 @@
 
 namespace Components {
 
-// ----------------------------------------------------------------------
-// Component construction and destruction
-// ----------------------------------------------------------------------
-
 USBSoundCard::USBSoundCard(const char *const compName)
     : USBSoundCardComponentBase(compName),
       m_transmissionActive(false),
@@ -31,18 +27,13 @@ USBSoundCard::USBSoundCard(const char *const compName)
       m_aprsPacketCount(0),
       m_lineBufferPos(0)
 {
-    // Initialize transmission buffer
     initializeTransmissionBuffer();
-    
-    // Initialize Direwolf pipe
     initializeDirewolfPipe();
     
-    // Clear line buffer
     memset(m_lineBuffer, 0, sizeof(m_lineBuffer));
 }
 
 USBSoundCard::~USBSoundCard() {
-    // Clean up Direwolf pipe
     if (m_direwolfPipe >= 0) {
         close(m_direwolfPipe);
     }
@@ -122,17 +113,15 @@ void USBSoundCard::SEND_TEST_PACKET_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) 
 
 
 void USBSoundCard::run_handler(FwIndexType portNum, U32 context) {
-    // Read from Direwolf pipe
     readDirewolfOutput();
 }
 
 void USBSoundCard::initializeDirewolfPipe() {
     const char* pipePath = "/tmp/direwolf_output";
     
-    // Check if pipe exists
     struct stat st;
     if (stat(pipePath, &st) != 0) {
-        printf("[DIREWOLF] Pipe %s does not exist (Direwolf not running?)\n", pipePath);
+        printf("[DIREWOLF] Pipe %s does not exist\n", pipePath);
         m_direwolfActive = false;
         return;
     }
@@ -152,7 +141,6 @@ void USBSoundCard::initializeDirewolfPipe() {
 
 void USBSoundCard::readDirewolfOutput() {
     if (!m_direwolfActive) {
-        // Retry opening pipe periodically (every ~10 seconds at 10Hz rate)
         static U32 retryCounter = 0;
         if (++retryCounter % 100 == 0) {
             initializeDirewolfPipe();
@@ -180,20 +168,17 @@ void USBSoundCard::readDirewolfOutput() {
                 if (m_lineBufferPos < sizeof(m_lineBuffer) - 1) {
                     m_lineBuffer[m_lineBufferPos++] = c;
                 } else {
-                    // Line too long, reset
                     printf("[DIREWOLF] Line buffer overflow, resetting\n");
                     m_lineBufferPos = 0;
                 }
             }
         }
     } else if (bytesRead == 0) {
-        // Pipe closed (Direwolf stopped), attempt to reconnect
         close(m_direwolfPipe);
         m_direwolfPipe = -1;
         m_direwolfActive = false;
         printf("[DIREWOLF] Pipe closed, will attempt to reconnect\n");
     } else {
-        // Error reading
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
             printf("[DIREWOLF] Read error: %s\n", strerror(errno));
             close(m_direwolfPipe);
@@ -206,7 +191,6 @@ void USBSoundCard::readDirewolfOutput() {
 void USBSoundCard::parseDirewolfLine(const char* line) {
     printf("[DIREWOLF] Received: %s\n", line);
     
-    // Direwolf text output format examples:
     // [0] AMSAT-11>APDIGI:=3902.38N\07704.40W
     // [0.3] AMSAT-11>APDIGI:>MODE=a
     // [0] AMSAT-11>APDIGI:>BAT=12.6 TEMP=22.1
@@ -215,9 +199,9 @@ void USBSoundCard::parseDirewolfLine(const char* line) {
     if (!payload) {
         return;
     }
-    payload++; // Skip the ':'
+    payload++; 
+    // Skip the ':'
     
-    // Extract callsign (between ']' and '>')
     const char* callsignStart = strchr(line, ']');
     if (callsignStart) {
         callsignStart++; // Skip ']'
@@ -250,7 +234,6 @@ void USBSoundCard::parseDirewolfLine(const char* line) {
         return;
     }
     
-    // Check for telemetry in comment field
     if (payload[0] == '>') {
         parseAprsTelemetry(payload + 1);
         return;
@@ -263,10 +246,8 @@ void USBSoundCard::parseAprsPosition(const char* position) {
     
     F32 lat = 0, lon = 0;
     
-    // Skip position symbol (=, !, /)
     const char* p = position + 1;
     
-    // Parse latitude: DDMM.MM
     if (strlen(p) < 8) {
         logAprsParseError("Position string too short");
         return;
@@ -276,7 +257,6 @@ void USBSoundCard::parseAprsPosition(const char* position) {
     float latMin = atof(&p[2]);
     lat = latDeg + (latMin / 60.0);
     
-    // Check N/S
     const char* nsPtr = strchr(p, 'N');
     bool south = false;
     if (!nsPtr) {
@@ -311,12 +291,12 @@ void USBSoundCard::parseAprsPosition(const char* position) {
         if (west) lon = -lon;
     }
     
-    // Send to telemetry
-    sendAprsLatitude(lat);
-    sendAprsLongitude(lon);
-    logAprsPositionUpdate(lat, lon);
-    
-    printf("[APRS] Position parsed: LAT=%.6f, LON=%.6f\n", lat, lon);
+    this->tlmWrite_APRS_LATITUDE(lat);
+    printf("[APRS] Latitude updated: %.6f degrees\n", lat);
+    this->tlmWrite_APRS_LONGITUDE(lon);
+    printf("[APRS] Longitude updated: %.6f degrees\n", lon);
+    this->log_ACTIVITY_LO_APRS_POSITION_UPDATE(lat, lon);
+    printf("[APRS] Position: LAT=%.6f, LON=%.6f\n", lat, lon);
 }
 
 void USBSoundCard::parseAprsTelemetry(const char* telemetry) {
@@ -330,24 +310,28 @@ void USBSoundCard::parseAprsTelemetry(const char* telemetry) {
     
     if (batPtr) {
         bat = atof(batPtr + 4);
-        sendAprsBattery(bat);
+        this->tlmWrite_APRS_BATTERY(bat);
+        printf("[APRS] Battery voltage updated: %.2f V\n", bat);
         hasBat = true;
     }
     
     if (tempPtr) {
         temp = atof(tempPtr + 5);
-        sendAprsTemperature(temp);
+        this->tlmWrite_APRS_TEMPERATURE(temp);
+        printf("[APRS] Temperature updated: %.1f C\n", temp);
         hasTemp = true;
     }
     
     if (sigPtr) {
         sig = atof(sigPtr + 4);
-        sendAprsSignalStrength(sig);
+        this->tlmWrite_APRS_SIGNAL_STRENGTH(sig);
+        printf("[APRS] Signal strength updated: %.1f dBm\n", sig);
         hasSig = true;
     }
     
     if (hasBat && hasTemp) {
-        logAprsTelemetryUpdate(bat, temp);
+        this->log_ACTIVITY_LO_APRS_TELEMETRY_UPDATE(bat, temp);
+        printf("[APRS] Telemetry: BAT=%.1fV, TEMP=%.1fC\n", bat, temp);
     }
     
     printf("[APRS] Telemetry parsed: BAT=%.2f TEMP=%.2f SIG=%.2f\n", bat, temp, sig);
@@ -381,35 +365,6 @@ void USBSoundCard::handleModeCommand(char mode) {
 
 }
 
-// ----------------------------------------------------------------------
-// APRS Telemetry Methods
-// ----------------------------------------------------------------------
-
-void USBSoundCard::sendAprsLatitude(F32 latitude) {
-    this->tlmWrite_APRS_LATITUDE(latitude);
-    printf("[APRS] Latitude updated: %.6f degrees\n", latitude);
-}
-
-void USBSoundCard::sendAprsLongitude(F32 longitude) {
-    this->tlmWrite_APRS_LONGITUDE(longitude);
-    printf("[APRS] Longitude updated: %.6f degrees\n", longitude);
-}
-
-void USBSoundCard::sendAprsBattery(F32 voltage) {
-    this->tlmWrite_APRS_BATTERY(voltage);
-    printf("[APRS] Battery voltage updated: %.2f V\n", voltage);
-}
-
-void USBSoundCard::sendAprsTemperature(F32 temperature) {
-    this->tlmWrite_APRS_TEMPERATURE(temperature);
-    printf("[APRS] Temperature updated: %.1f C\n", temperature);
-}
-
-void USBSoundCard::sendAprsSignalStrength(F32 strength) {
-    this->tlmWrite_APRS_SIGNAL_STRENGTH(strength);
-    printf("[APRS] Signal strength updated: %.1f dBm\n", strength);
-}
-
 void USBSoundCard::logAprsPacketReceived(const char* callsign) {
     m_aprsPacketCount++;
     this->tlmWrite_APRS_PACKET_COUNT(m_aprsPacketCount);
@@ -419,22 +374,11 @@ void USBSoundCard::logAprsPacketReceived(const char* callsign) {
     printf("[APRS] Packet #%u received from %s\n", m_aprsPacketCount, callsign);
 }
 
-void USBSoundCard::logAprsPositionUpdate(F32 lat, F32 lon) {
-    this->log_ACTIVITY_LO_APRS_POSITION_UPDATE(lat, lon);
-    printf("[APRS] Position: LAT=%.6f, LON=%.6f\n", lat, lon);
-}
-
-void USBSoundCard::logAprsTelemetryUpdate(F32 battery, F32 temp) {
-    this->log_ACTIVITY_LO_APRS_TELEMETRY_UPDATE(battery, temp);
-    printf("[APRS] Telemetry: BAT=%.1fV, TEMP=%.1fC\n", battery, temp);
-}
-
 void USBSoundCard::logAprsParseError(const char* error) {
     Fw::LogStringArg errorArg(error);
     this->log_WARNING_HI_APRS_PARSE_ERROR(errorArg);
     printf("[APRS] Parse error: %s\n", error);
 }
-
 
 void USBSoundCard::initializeTransmissionBuffer() {
     const U32 maxAudioSize = 1024 * sizeof(short);
