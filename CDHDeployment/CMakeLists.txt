@@ -15,3 +15,4 @@ register_fprime_deployment(
     DEPENDS
         ${FPRIME_CURRENT_MODULE}_Top
 )
+add_fprime_subdirectory("${CMAKE_CURRENT_LIST_DIR}/AMSATDeframer/")

@@ -37,6 +37,10 @@ USBSoundCard::~USBSoundCard() {
     if (m_direwolfPipe >= 0) {
         close(m_direwolfPipe);
     }
+
+    if (m_transmissionBuffer.getData() != nullptr) {
+        delete[] m_transmissionBuffer.getData();
+    }
 }
 
 
@@ -222,7 +226,7 @@ void USBSoundCard::parseDirewolfLine(const char* line) {
     
     if (strstr(payload, "MODE=") != nullptr) {
         const char* modePtr = strstr(payload, "MODE=");
-        if (modePtr[5] != '\0') {
+        if (strlen(modePtr) > 5 && modePtr[5] != '\0') {
             char mode = modePtr[5];
             handleModeCommand(mode);
         }
@@ -300,29 +304,29 @@ void USBSoundCard::parseAprsPosition(const char* position) {
 }
 
 void USBSoundCard::parseAprsTelemetry(const char* telemetry) {
-    
+
     const char* batPtr = strstr(telemetry, "BAT=");
     const char* tempPtr = strstr(telemetry, "TEMP=");
     const char* sigPtr = strstr(telemetry, "SIG=");
-    
+
     F32 bat = 0, temp = 0, sig = 0;
     bool hasBat = false, hasTemp = false, hasSig = false;
-    
-    if (batPtr) {
+
+    if (batPtr && strlen(batPtr) > 4 && batPtr[4] != '\0') {
         bat = atof(batPtr + 4);
         this->tlmWrite_APRS_BATTERY(bat);
         printf("[APRS] Battery voltage updated: %.2f V\n", bat);
         hasBat = true;
     }
-    
-    if (tempPtr) {
+
+    if (tempPtr && strlen(tempPtr) > 5 && tempPtr[5] != '\0') {
         temp = atof(tempPtr + 5);
         this->tlmWrite_APRS_TEMPERATURE(temp);
         printf("[APRS] Temperature updated: %.1f C\n", temp);
         hasTemp = true;
     }
-    
-    if (sigPtr) {
+
+    if (sigPtr && strlen(sigPtr) > 4 && sigPtr[4] != '\0') {
         sig = atof(sigPtr + 4);
         this->tlmWrite_APRS_SIGNAL_STRENGTH(sig);
         printf("[APRS] Signal strength updated: %.1f dBm\n", sig);
@@ -362,6 +366,7 @@ void USBSoundCard::handleModeCommand(char mode) {
     Fw::LogStringArg modeArg(modeName);
     
     // TODO: Send command via F Prime output port to other components
+    // Check AMSAT config commands
 
 }
 
