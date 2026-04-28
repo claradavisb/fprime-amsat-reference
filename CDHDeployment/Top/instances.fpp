@@ -109,6 +109,7 @@ module CDHDeployment {
 
   # AMSAT components
   instance amsatFramer: Svc.AMSATFramer base id 0x5000
+  instance amsatDeframer: Svc.AMSATDeframer base id 0x5100
   instance radioBridge: RadioBridge.RadioBridge \
     base id 0x6500 \
     queue size 10 \

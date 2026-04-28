@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fprime-gds-ax25-kiss"
+version = "0.1.0"
+description = "fprime-gds framing plugin: AX.25 KISS for Direwolf uplink"
+dependencies = ["fprime-gds>=3.4.0"]
+
+[project.entry-points.fprime_gds]
+ax25_kiss = "ax25_kiss_framer:AX25KissFramer"

@@ -19,14 +19,6 @@ telemetry packets CDHDeploymentPackets {
     CDHDeployment.fileManager.CommandsExecuted
     CDHDeployment.comQueue.comQueueDepth
     CDHDeployment.comQueue.buffQueueDepth
-    # USB Sound Card telemetry
-    CDHDeployment.usbSoundCard.AUDIO_INPUT_LEVEL
-    CDHDeployment.usbSoundCard.DEVICE_CONNECTED
-    CDHDeployment.usbSoundCard.FRAMES_PROCESSED
-    CDHDeployment.usbSoundCard.AUDIO_PEAK_LEVEL
-    CDHDeployment.usbSoundCard.TRANSMISSION_ACTIVE
-    CDHDeployment.usbSoundCard.PACKETS_TRANSMITTED
-    CDHDeployment.usbSoundCard.LAST_TRANSMISSION_TIME
     # Note: Uncomment when using Svc:TlmPacketizer
     # CDHDeployment.tlmSend.SendLevel
   }
@@ -43,16 +35,6 @@ telemetry packets CDHDeploymentPackets {
     CDHDeployment.bufferManager.NoBuffs
     CDHDeployment.bufferManager.EmptyBuffs
     CDHDeployment.fileManager.Errors
-  }
-
-  packet APRSTelemetry id 3 group 1 {
-    # APRS CubeSat telemetry channels
-    CDHDeployment.usbSoundCard.APRS_LATITUDE
-    CDHDeployment.usbSoundCard.APRS_LONGITUDE
-    CDHDeployment.usbSoundCard.APRS_BATTERY
-    CDHDeployment.usbSoundCard.APRS_TEMPERATURE
-    CDHDeployment.usbSoundCard.APRS_PACKET_COUNT
-    CDHDeployment.usbSoundCard.APRS_SIGNAL_STRENGTH
   }
 
   packet SystemRes1 id 4 group 2 {
@@ -150,6 +132,13 @@ telemetry packets CDHDeploymentPackets {
 
   packet Version_Custom10 id 21 group 2 {
     CDHDeployment.version.CustomVersion10
+  }
+
+  packet USBSoundCard id 22 group 1 {
+    CDHDeployment.usbSoundCard.AUDIO_INPUT_LEVEL
+    CDHDeployment.usbSoundCard.DEVICE_CONNECTED
+    CDHDeployment.usbSoundCard.FRAMES_PROCESSED
+    CDHDeployment.usbSoundCard.AUDIO_PEAK_LEVEL
   }
 
 } omit {

@@ -8,6 +8,7 @@
 add_fprime_subdirectory("${CMAKE_CURRENT_LIST_DIR}/Top/")
 add_fprime_subdirectory("${CMAKE_CURRENT_LIST_DIR}/RadioBridge/")  # Remove for now
 add_fprime_subdirectory("${CMAKE_CURRENT_LIST_DIR}/AMSATFramer/")
+add_fprime_subdirectory("${CMAKE_CURRENT_LIST_DIR}/AMSATDeframer/")
 
 register_fprime_deployment(
     SOURCES
@@ -15,4 +16,3 @@ register_fprime_deployment(
     DEPENDS
         ${FPRIME_CURRENT_MODULE}_Top
 )
-add_fprime_subdirectory("${CMAKE_CURRENT_LIST_DIR}/AMSATDeframer/")

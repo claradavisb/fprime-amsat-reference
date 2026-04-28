@@ -2,28 +2,37 @@ module Svc {
 
     passive component AMSATDeframer {
 
-        # sync input port dataIn: Fw.BufferSend
+        # ----------------------------------------------------------------------
+        # Data ports
+        # ----------------------------------------------------------------------
 
+        @ Receive AX.25 frames from USBSoundCard (via Direwolf KISS interface)
+        sync input port dataIn: Fw.BufferSend
 
+        @ Forward extracted F′ command packets to command dispatcher
+        output port comOut: Fw.Com
 
-        ##############################################################################
-        #### Uncomment the following examples to start customizing your component ####
-        ##############################################################################
+        @ Receive command status response from CmdDispatcher (required matched port for seqCmdBuff)
+        sync input port cmdResponseIn: Fw.CmdResponse
 
-        # @ Example async command
-        # async command COMMAND_NAME(param_name: U32)
+        # ----------------------------------------------------------------------
+        # Events
+        # ----------------------------------------------------------------------
 
-        # @ Example telemetry counter
-        # telemetry ExampleCounter: U64
+        @ AX.25 frame too short to be valid
+        event FRAME_TOO_SHORT(frameSize: U32) \
+            severity warning high id 0 \
+            format "AX.25 frame too short: {} bytes"
 
-        # @ Example event
-        # event ExampleStateEvent(example_state: Fw.On) severity activity high id 0 format "State set to {}"
+        @ AX.25 CRC verification failed
+        event FRAME_CRC_ERROR(frameSize: U32) \
+            severity warning high id 1 \
+            format "AX.25 CRC error on frame of {} bytes"
 
-        # @ Example port: receiving calls from the rate group
-        # sync input port run: Svc.Sched
-
-        # @ Example parameter
-        # param PARAMETER_NAME: U32
+        @ F′ packet successfully extracted and dispatched
+        event FRAME_DISPATCHED(payloadSize: U32) \
+            severity activity low id 2 \
+            format "F′ packet dispatched: {} bytes"
 
         ###############################################################################
         # Standard AC Ports: Required for Channels, Events, Commands, and Parameters  #

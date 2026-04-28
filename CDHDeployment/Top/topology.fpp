@@ -54,6 +54,7 @@ module CDHDeployment {
     instance version
     instance linuxTimer
     instance amsatFramer
+    instance amsatDeframer
     instance radioBridge
     instance usbSoundCard
     # ----------------------------------------------------------------------
@@ -168,7 +169,10 @@ module CDHDeployment {
     }
 
     connections CDHDeployment {
-      # Add connections here to user-defined components
+      # Uplink: USBSoundCard (KISS RX) -> AMSATDeframer -> CmdDispatcher
+      usbSoundCard.ax25Out    -> amsatDeframer.dataIn
+      amsatDeframer.comOut    -> cmdDisp.seqCmdBuff
+      cmdDisp.seqCmdStatus    -> amsatDeframer.cmdResponseIn
     }
 
     connections RadioBridge {

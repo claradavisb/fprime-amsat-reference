@@ -1,6 +1,6 @@
 // ======================================================================
 // \title  AMSATDeframer.cpp
-// \author cdavi125
+// \author cdavi125 and Claude Code
 // \brief  cpp file for AMSATDeframer component implementation class
 // ======================================================================
 
@@ -11,8 +11,7 @@
 
 namespace Svc {
 
-// CRC-16 lookup table for AX.25
-const U16 AMSATFramer::crc16Table[256] = {
+const U16 AMSATDeframer::crc16Table[256] = {
     0x0000, 0xc0c1, 0xc181, 0x0140, 0xc301, 0x03c0, 0x0280, 0xc241,
     0xc601, 0x06c0, 0x0780, 0xc741, 0x0500, 0xc5c1, 0xc481, 0x0440,
     0xcc01, 0x0cc0, 0x0d80, 0xcd41, 0x0f00, 0xcfc1, 0xce81, 0x0e40,
@@ -57,8 +56,61 @@ AMSATDeframer ::AMSATDeframer(const char *const compName)
 
 AMSATDeframer ::~AMSATDeframer() {}
 
+// ----------------------------------------------------------------------
+// Handler implementations
+// ----------------------------------------------------------------------
 
-U16 AMSATFramer::calculateCRC16(const U8* data, FwSizeType length) {
+void AMSATDeframer::dataIn_handler(FwIndexType portNum, Fw::Buffer& buffer) {
+    const U8* data = buffer.getData();
+    FwSizeType frameSize = buffer.getSize();
+
+    if (frameSize < AX25_MIN_SIZE) {
+        printf("[DEFRAMER] Frame too short: %lu bytes\n", frameSize);
+        this->log_WARNING_HI_FRAME_TOO_SHORT(static_cast<U32>(frameSize));
+        return;
+    }
+    
+    // left-shifted by 1 in AX.25 encoding
+    char dest[7] = {0};
+    char src[7]  = {0};
+    for (int i = 0; i < 6; i++) {
+        dest[i] = static_cast<char>(data[i]     >> 1);
+        src[i]  = static_cast<char>(data[i + 7] >> 1);
+    }
+    printf("[DEFRAMER] Frame from %s -> %s, %lu byte payload\n",
+           src, dest, frameSize - AX25_MIN_SIZE);
+
+    // [header 16B][payload][crc 2B]
+    const U8*   payload     = data + AX25_HEADER_SIZE;
+    FwSizeType  payloadSize = frameSize - AX25_HEADER_SIZE;
+
+    if (payloadSize == 0) {
+        printf("[DEFRAMER] Empty payload, discarding\n");
+        return;
+    }
+
+    Fw::ComBuffer comBuf;
+    Fw::SerializeStatus status = comBuf.serialize(payload, payloadSize, Fw::Serialization::OMIT_LENGTH);
+    if (status != Fw::FW_SERIALIZE_OK) {
+        printf("[DEFRAMER] ComBuffer serialize failed (payload %lu bytes)\n", payloadSize);
+        return;
+    }
+
+    this->log_ACTIVITY_LO_FRAME_DISPATCHED(static_cast<U32>(payloadSize));
+    this->comOut_out(0, comBuf, 0);
+}
+
+void AMSATDeframer::cmdResponseIn_handler(FwIndexType portNum,
+                                          FwOpcodeType opcode,
+                                          U32 cmdSeq,
+                                          const Fw::CmdResponse& response) {
+}
+
+// ----------------------------------------------------------------------
+// Helper functions
+// ----------------------------------------------------------------------
+
+U16 AMSATDeframer::calculateCRC16(const U8* data, FwSizeType length) {
     FW_ASSERT(data != nullptr);
 
     U16 crc = 0xFFFF;

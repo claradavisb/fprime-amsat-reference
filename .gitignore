@@ -1,3 +1,8 @@
 build-artifacts
 build-fprime-*
 fprime-venv
+logs/
+build.log
+__pycache__/
+*.pyc
+*.egg-info/
