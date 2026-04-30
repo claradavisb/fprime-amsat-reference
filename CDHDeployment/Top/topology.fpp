@@ -101,6 +101,11 @@ module CDHDeployment {
         framer.bufferAllocate   -> bufferManager.bufferGetCallee
         framer.bufferDeallocate -> bufferManager.bufferSendIn
         
+        # Framer <-> ComStub
+        framer.dataOut        -> comStub.dataIn
+        comStub.dataReturnOut -> framer.dataReturnIn
+        comStub.comStatusOut  -> framer.comStatusIn
+
         # ComStub <-> ComDriver
         comStub.drvSendOut      -> comDriver.$send
         comDriver.sendReturnOut -> comStub.drvSendReturnIn
