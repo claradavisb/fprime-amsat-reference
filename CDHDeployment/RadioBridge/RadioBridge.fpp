@@ -1,6 +1,6 @@
 module RadioBridge {
   @ Component that receives AX.25 frames and transmits via direwolf/rpitx
-  active component RadioBridge {
+  passive component RadioBridge {
 
     # ----------------------------------------------------------------------
     # Standard ports
@@ -16,7 +16,7 @@ module RadioBridge {
     # Data ports (COM-with-context to match AMSATFramer)
     # ----------------------------------------------------------------------
     @ Receive AX.25 frames (Fw::Buffer + FrameContext) from AMSATFramer
-    async input port dataIn: Svc.ComDataWithContext
+    sync input port dataIn: Svc.ComDataWithContext
 
     @ Return the buffer after transmission (same context back)
     output port dataReturnOut: Svc.ComDataWithContext

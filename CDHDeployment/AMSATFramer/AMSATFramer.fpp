@@ -3,9 +3,14 @@ module Svc {
   passive component AMSATFramer {
 
     # COM-with-context data path
-    sync input  port dataIn:       Svc.ComDataWithContext
-    output      port dataOut:      Svc.ComDataWithContext
-    sync input  port dataReturnIn: Svc.ComDataWithContext
+    sync input  port dataIn:        Svc.ComDataWithContext
+    output      port dataOut:       Svc.ComDataWithContext
+    sync input  port dataReturnIn:  Svc.ComDataWithContext
+    output      port dataReturnOut: Svc.ComDataWithContext
+    output      port comStatusOut:  Fw.SuccessCondition
+
+    # TCP forwarding — sends raw F Prime packet to TCP framer so GDS receives events
+    output port tcpOut: Svc.ComDataWithContext
 
     # Buffer allocation
     output port bufferAllocate:   Fw.BufferGet

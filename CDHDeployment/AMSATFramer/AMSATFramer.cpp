@@ -184,8 +184,15 @@ void AMSATFramer::dataIn_handler(
     if (data.getSize() < 1) {
         printf("ERROR: Buffer too small\n");
         this->log_WARNING_HI_InvalidInputBuffer();
-        this->bufferDeallocate_out(0, data);
+        this->dataReturnOut_out(0, data, context);
+        Fw::Success failStatus = Fw::Success::FAILURE;
+        this->comStatusOut_out(0, failStatus);
         return;
+    }
+
+    // Forward raw F Prime packet to TCP framer so GDS receives events/telemetry
+    if (this->isConnected_tcpOut_OutputPort(0)) {
+        this->tcpOut_out(0, data, context);
     }
 
     // Build AX.25 frame from incoming buffer
@@ -196,7 +203,9 @@ void AMSATFramer::dataIn_handler(
     if (amsatFrame.getData() == nullptr) {
         printf("ERROR: Failed to allocate buffer\n");
         this->log_WARNING_HI_BufferAllocationFailed();
-        this->bufferDeallocate_out(0, data);
+        this->dataReturnOut_out(0, data, context);
+        Fw::Success failStatus = Fw::Success::FAILURE;
+        this->comStatusOut_out(0, failStatus);
         return;
     }
 
@@ -224,8 +233,10 @@ void AMSATFramer::dataIn_handler(
     // Forward the AX.25 frame to RadioBridge
     this->dataOut_out(0, amsatFrame, context);
 
-    // Release the original input buffer
-    this->bufferDeallocate_out(0, data);
+    // Return the original buffer to comQueue and signal it to send the next packet
+    this->dataReturnOut_out(0, data, context);
+    Fw::Success okStatus = Fw::Success::SUCCESS;
+    this->comStatusOut_out(0, okStatus);
 
     printf("[LIVE MODE] Frame forwarded to RadioBridge\n\n");
 }

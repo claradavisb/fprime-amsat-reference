@@ -92,15 +92,18 @@ module CDHDeployment {
         fileDownlink.bufferSendOut  -> comQueue.bufferQueueIn[Ports_ComBufferQueue.FILE_DOWNLINK]
         comQueue.bufferReturnOut[Ports_ComBufferQueue.FILE_DOWNLINK] -> fileDownlink.bufferReturn
 
-        # ComQueue <-> Framer
-        comQueue.dataOut   -> framer.dataIn
-        framer.dataReturnOut -> comQueue.dataReturnIn
-        framer.comStatusOut  -> comQueue.comStatusIn
+        # ComQueue -> AMSATFramer (RF downlink via RadioBridge/rpitx)
+        comQueue.dataOut          -> amsatFramer.dataIn
+        amsatFramer.dataReturnOut -> comQueue.dataReturnIn
+        amsatFramer.comStatusOut  -> comQueue.comStatusIn
+
+        # AMSATFramer also forwards raw F Prime packets to TCP framer for GDS feedback
+        amsatFramer.tcpOut -> framer.dataIn
 
         # Buffer Management for Framer
         framer.bufferAllocate   -> bufferManager.bufferGetCallee
         framer.bufferDeallocate -> bufferManager.bufferSendIn
-        
+
         # Framer <-> ComStub
         framer.dataOut        -> comStub.dataIn
         comStub.dataReturnOut -> framer.dataReturnIn

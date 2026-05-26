@@ -40,6 +40,12 @@ class AX25KissFramer(FramerDeframer):
             if len(ax25) <= self.AX25_HEADER_SIZE:
                 continue
             payload = ax25[self.AX25_HEADER_SIZE:]
+            # RadioBridge hex-encodes binary F' bytes into the AX.25 info field
+            # (gen_packets only accepts TNC2 text format). Decode it back here.
+            try:
+                payload = bytes.fromhex(payload.decode("ascii").strip())
+            except (ValueError, UnicodeDecodeError):
+                pass  # not hex-encoded (e.g. direct binary uplink), use as-is
             return payload, data, b""
         return None, data, b""
 
