@@ -8,7 +8,10 @@ class AX25KissFramer(FramerDeframer):
     KISS_FESC  = 0xDB
     KISS_TFEND = 0xDC
     KISS_TFDD  = 0xDD
-    AX25_HEADER_SIZE = 16
+
+    # Known F' packet type bytes (FwPacketType enum values).
+    # Used to validate the result of the hex-decode fallback path.
+    _FP_TYPES = frozenset([1, 2, 3, 4, 5])  # COMMAND, TELEM, LOG, FILE, HAND
 
     def __init__(self, ax25_dest="SATSIM", ax25_src="W1AW"):
         self.dest_call = ax25_dest
@@ -37,18 +40,43 @@ class AX25KissFramer(FramerDeframer):
             if len(raw_frame) < 1 or (raw_frame[0] & 0x0F) != 0x00:
                 continue
             ax25 = raw_frame[1:]  # strip KISS command byte
-            if len(ax25) <= self.AX25_HEADER_SIZE:
+
+            # Find end of AX.25 address fields by scanning for the end-of-address
+            # bit (LSB of each 7th/14th/... SSID byte). Standard frames have two
+            # address fields (dest + src = 14 bytes); digipeater hops add more.
+            info_start = self._ax25_info_offset(ax25)
+            if info_start is None:
                 continue
-            payload = ax25[self.AX25_HEADER_SIZE:]
-            # RadioBridge hex-encodes binary F' bytes into the AX.25 info field
-            # (gen_packets only accepts TNC2 text format). Decode it back here.
+            payload = ax25[info_start:]
+            if not payload:
+                continue
+
+            # Fallback hex-decode for the gen_packets/rpitx transmission path
+            # where RadioBridge serialised binary F' bytes as ASCII hex into the
+            # AX.25 info field. Only accept the decoded result when it starts with
+            # a recognised F' packet type byte to avoid corrupting binary frames.
+            # TODO: remove this block once the KISS-socket RadioBridge is deployed.
             try:
-                payload = bytes.fromhex(payload.decode("ascii").strip())
+                decoded = bytes.fromhex(payload.decode("ascii").strip())
+                if decoded and decoded[0] in self._FP_TYPES:
+                    payload = decoded
             except (ValueError, UnicodeDecodeError):
-                pass  # not hex-encoded (e.g. direct binary uplink), use as-is
+                pass  # binary payload (normal path) — use as-is
+
             return payload, data, b""
         return None, data, b""
 
+    def _ax25_info_offset(self, ax25: bytes) -> int | None:
+        """Return byte index of the AX.25 info field, or None if frame is too short."""
+        i = 0
+        while i + 7 <= len(ax25):
+            ssid_byte = ax25[i + 6]
+            i += 7
+            if ssid_byte & 0x01:  # end-of-address bit set
+                # Skip control byte + PID byte (UI frames always have PID)
+                i += 2
+                return i if i <= len(ax25) else None
+        return None  # end-of-address bit never found — malformed frame
 
     def _encode_callsign(self, call: str, last: bool) -> bytes:
         call = call.upper().ljust(6)[:6]

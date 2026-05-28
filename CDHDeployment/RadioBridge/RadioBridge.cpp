@@ -184,9 +184,10 @@ std::string RadioBridge::decodeCallsign(const U8* encoded) {
 
 void RadioBridge::assertPTT(bool tx) {
     // GPIO 20 is PTT: HIGH = transmit, LOW = receive (per fm_init.py in setup_pi.sh)
+    // GPIO 20 is active-low PTT: LOW = transmit, HIGH = receive (per fm_init.py)
     { std::ofstream f("/sys/class/gpio/export");         if (f) f << "20"; }
     { std::ofstream f("/sys/class/gpio/gpio20/direction"); if (f) f << "out"; }
-    { std::ofstream f("/sys/class/gpio/gpio20/value");     if (f) f << (tx ? "1" : "0"); }
+    { std::ofstream f("/sys/class/gpio/gpio20/value");     if (f) f << (tx ? "0" : "1"); }
 }
 
 } // namespace RadioBridge
