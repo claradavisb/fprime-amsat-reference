@@ -5,6 +5,7 @@
 // ======================================================================
 // Provides access to autocoded functions
 #include <CDHDeployment/Top/CDHDeploymentTopologyAc.hpp>
+#include <CDHDeployment/AMSATFramer/AMSATFramer.hpp>
 // Note: Uncomment when using Svc:TlmPacketizer
 //#include <CDHDeployment/Top/CDHDeploymentPacketsAc.hpp>
 
@@ -154,6 +155,9 @@ void setupTopology(const TopologyState& state) {
     loadParameters();
     // Autocoded task kick-off (active components). Function provided by autocoder.
     startTasks(state);
+    // Prime comQueue: AMSATFramer has no hardware "ready" signal like the TCP framer,
+    // so send an initial SUCCESS to unblock comQueue's first send.
+    amsatFramer.sendReadySignal();
     // Initialize socket communication if and only if there is a valid specification
     if (state.hostname != nullptr && state.port != 0) {
         Os::TaskString name("ReceiveTask");

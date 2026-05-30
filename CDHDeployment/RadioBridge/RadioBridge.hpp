@@ -18,7 +18,7 @@ class RadioBridge : public RadioBridgeComponentBase {
         const ComCfg::FrameContext& context
     ) override;
     
-    bool transmitAX25Frame(const U8* data, FwSizeType size);
+    bool transmitKISS(const U8* data, FwSizeType size);
 };
 
 } // namespace RadioBridge

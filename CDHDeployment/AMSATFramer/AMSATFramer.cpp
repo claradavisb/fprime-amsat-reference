@@ -81,6 +81,11 @@ void AMSATFramer::setSourceCallsign(const char* callsign, U8 ssid) {
     m_srcSSID = ssid & 0x0F;
 }
 
+void AMSATFramer::sendReadySignal() {
+    Fw::Success ready = Fw::Success::SUCCESS;
+    this->comStatusOut_out(0, ready);
+}
+
 void AMSATFramer::setDestCallsign(const char* callsign, U8 ssid) {
     FW_ASSERT(callsign != nullptr);
     strncpy(m_destCallsign, callsign, AX25_CALLSIGN_LEN);
@@ -127,8 +132,9 @@ void AMSATFramer::TEST_SEND_DATA_cmdHandler(
         testData[offset] = 0xAA;
     }
 
-    // Build AX.25 frame into an allocated buffer
-    const FwSizeType amsatOverhead = 20;
+    // Build bare AX.25 UI frame for KISS: [dest 7][src 7][ctrl][pid][payload]
+    // Direwolf adds HDLC flags and computes FCS before transmitting.
+    const FwSizeType amsatOverhead = 16;
     const FwSizeType amsatFrameSize = testDataSize + amsatOverhead;
 
     Fw::Buffer amsatFrame = this->bufferAllocate_out(0, amsatFrameSize);
@@ -142,7 +148,6 @@ void AMSATFramer::TEST_SEND_DATA_cmdHandler(
     U8* framePtr = amsatFrame.getData();
     FwSizeType frameOffset = 0;
 
-    framePtr[frameOffset++] = AX25_FLAG; // start flag
     frameOffset += encodeAddress(&framePtr[frameOffset], m_destCallsign, m_destSSID, false);
     frameOffset += encodeAddress(&framePtr[frameOffset], m_srcCallsign,  m_srcSSID,  true);
     framePtr[frameOffset++] = AX25_CONTROL;
@@ -151,11 +156,6 @@ void AMSATFramer::TEST_SEND_DATA_cmdHandler(
     memcpy(&framePtr[frameOffset], testData, testDataSize);
     frameOffset += testDataSize;
 
-    U16 crc = calculateCRC16(&framePtr[1], frameOffset - 1);
-    framePtr[frameOffset++] = static_cast<U8>(crc & 0xFF);
-    framePtr[frameOffset++] = static_cast<U8>((crc >> 8) & 0xFF);
-
-    framePtr[frameOffset++] = AX25_FLAG; // end flag
     amsatFrame.setSize(frameOffset);
 
     // Send to RadioBridge
@@ -195,8 +195,9 @@ void AMSATFramer::dataIn_handler(
         this->tcpOut_out(0, data, context);
     }
 
-    // Build AX.25 frame from incoming buffer
-    const FwSizeType amsatOverhead = 20;
+    // Build bare AX.25 UI frame for KISS: [dest 7][src 7][ctrl][pid][payload]
+    // Direwolf adds HDLC flags and computes FCS before transmitting.
+    const FwSizeType amsatOverhead = 16;
     const FwSizeType amsatFrameSize = data.getSize() + amsatOverhead;
 
     Fw::Buffer amsatFrame = this->bufferAllocate_out(0, amsatFrameSize);
@@ -212,7 +213,6 @@ void AMSATFramer::dataIn_handler(
     U8* framePtr = amsatFrame.getData();
     FwSizeType offset = 0;
 
-    framePtr[offset++] = AX25_FLAG;
     offset += encodeAddress(&framePtr[offset], m_destCallsign, m_destSSID, false);
     offset += encodeAddress(&framePtr[offset], m_srcCallsign,  m_srcSSID,  true);
     framePtr[offset++] = AX25_CONTROL;
@@ -221,11 +221,6 @@ void AMSATFramer::dataIn_handler(
     memcpy(&framePtr[offset], data.getData(), data.getSize());
     offset += data.getSize();
 
-    U16 crc = calculateCRC16(&framePtr[1], offset - 1);
-    framePtr[offset++] = static_cast<U8>(crc & 0xFF);
-    framePtr[offset++] = static_cast<U8>((crc >> 8) & 0xFF);
-
-    framePtr[offset++] = AX25_FLAG;
     amsatFrame.setSize(offset);
 
     this->log_ACTIVITY_LO_FrameCreated(static_cast<U32>(offset));

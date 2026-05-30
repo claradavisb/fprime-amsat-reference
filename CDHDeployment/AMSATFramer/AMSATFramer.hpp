@@ -13,6 +13,7 @@ class AMSATFramer : public AMSATFramerComponentBase {
 
   void setSourceCallsign(const char* callsign, U8 ssid);
   void setDestCallsign(const char* callsign, U8 ssid);
+  void sendReadySignal();
 
  protected:
   void dataIn_handler(
