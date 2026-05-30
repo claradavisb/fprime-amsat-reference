@@ -26,7 +26,7 @@ LedBlinker::~LedBlinker() {
 
 void LedBlinker::seqCmdIn_handler(FwIndexType portNum, Fw::ComBuffer& data, U32 context) {
     gpioWrite(LED_GPIO, 1);
-    m_blinkPending = true;
+    m_blinkCount = BLINK_TICKS;
     seqCmdOut_out(0, data, context);
 }
 
@@ -35,9 +35,10 @@ void LedBlinker::seqCmdStatusIn_handler(FwIndexType portNum, FwOpcodeType opCode
 }
 
 void LedBlinker::schedIn_handler(FwIndexType portNum, U32 context) {
-    if (m_blinkPending) {
-        gpioWrite(LED_GPIO, 0);
-        m_blinkPending = false;
+    if (m_blinkCount > 0) {
+        if (--m_blinkCount == 0) {
+            gpioWrite(LED_GPIO, 0);
+        }
     }
 }
 

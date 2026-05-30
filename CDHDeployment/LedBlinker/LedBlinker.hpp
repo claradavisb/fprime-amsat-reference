@@ -15,7 +15,8 @@ class LedBlinker : public LedBlinkerComponentBase {
     void seqCmdStatusIn_handler(FwIndexType portNum, FwOpcodeType opCode, U32 cmdSeq, const Fw::CmdResponse& response) override;
     void schedIn_handler(FwIndexType portNum, U32 context) override;
 
-    bool m_blinkPending = false;
+    static constexpr int BLINK_TICKS = 3;
+    int m_blinkCount = 0;
 };
 
 } // namespace CDHDeployment
