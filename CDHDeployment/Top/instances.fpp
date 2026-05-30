@@ -108,6 +108,8 @@ module CDHDeployment {
   instance linuxTimer: Svc.LinuxTimer base id 0x4F00
 
   # AMSAT components
+  instance ledBlinkerTcp: CDHDeployment.LedBlinker base id 0x5200
+  instance ledBlinkerRf:  CDHDeployment.LedBlinker base id 0x5300
   instance amsatFramer: Svc.AMSATFramer base id 0x5000
   instance amsatDeframer: Svc.AMSATDeframer base id 0x5100
   instance radioBridge: RadioBridge.RadioBridge base id 0x6500

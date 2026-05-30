@@ -113,7 +113,7 @@ void USBSoundCard::readKissData() {
 
     if (!m_kissConnected) {
         static U32 retryCounter = 0;
-        if (++retryCounter % 100 == 0) {
+        if (++retryCounter % 5 == 0) {
             initializeKissSocket();
         }
         return;
