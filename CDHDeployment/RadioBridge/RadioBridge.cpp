@@ -82,17 +82,18 @@ bool RadioBridge::transmitAX25Frame(const U8* data, FwSizeType size) {
     printf("[RadioBridge] Payload: %lu bytes → %lu hex chars\n",
            payloadSize, payloadSize * 2);
 
-    // Encode as 1200 bps Bell 202 AFSK audio
-    int ret = system("gen_packets -r 44100 -o /tmp/fprime_telem.wav /tmp/fprime_telem.txt 2>/dev/null");
+    // Encode AFSK audio then convert to rpitx RF format via csdr pipeline.
+    // rpitx -m RF expects (double frequency, nanosecond time) pairs, not raw
+    // audio — csdr convert_f_samplerf produces that format from float samples.
+    // rpitx -f takes kHz: 434900 = 434.9 MHz.
+    int ret = system(
+        "gen_packets -r 48000 -o /tmp/fprime_telem.wav /tmp/fprime_telem.txt > /dev/null 2>&1 && "
+        "cat /tmp/fprime_telem.wav | csdr convert_i16_f | csdr gain_ff 7000 | "
+        "csdr convert_f_samplerf 20833 | "
+        "sudo /usr/local/bin/rpitx -i- -m RF -f 434900 > /dev/null 2>&1"
+    );
     if (ret != 0) {
-        printf("[RadioBridge] gen_packets failed (exit %d)\n", ret);
-        return false;
-    }
-
-    // Transmit via rpitx on GPIO 4 at 434.9 MHz. rpitx -f takes kHz.
-    ret = system("rpitx -m RF -i /tmp/fprime_telem.wav -f 434900 -s 44100 2>/dev/null");
-    if (ret != 0) {
-        printf("[RadioBridge] rpitx failed (exit %d)\n", ret);
+        printf("[RadioBridge] transmission pipeline failed (exit %d)\n", ret);
         return false;
     }
 
