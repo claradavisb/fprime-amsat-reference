@@ -3,7 +3,6 @@
 
 #include "CDHDeployment/RadioBridge/RadioBridgeComponentAc.hpp"
 #include "Fw/Types/BasicTypes.hpp"
-#include <string>
 
 namespace RadioBridge {
 
@@ -20,10 +19,6 @@ class RadioBridge : public RadioBridgeComponentBase {
     ) override;
     
     bool transmitAX25Frame(const U8* data, FwSizeType size);
-
-    std::string decodeCallsign(const U8* encoded);
-
-    void assertPTT(bool tx);
 };
 
 } // namespace RadioBridge
