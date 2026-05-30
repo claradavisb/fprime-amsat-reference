@@ -57,6 +57,8 @@ module CDHDeployment {
     instance amsatDeframer
     instance radioBridge
     instance usbSoundCard
+    instance ledBlinkerTcp
+    instance ledBlinkerRf
     # ----------------------------------------------------------------------
     # Pattern graph specifiers
     # ----------------------------------------------------------------------
@@ -166,18 +168,27 @@ module CDHDeployment {
       # Router buffer allocations
       fprimeRouter.bufferAllocate   -> bufferManager.bufferGetCallee
       fprimeRouter.bufferDeallocate -> bufferManager.bufferSendIn
-      # Router <-> CmdDispatcher/FileUplink
-      fprimeRouter.commandOut  -> cmdDisp.seqCmdBuff
-      cmdDisp.seqCmdStatus     -> fprimeRouter.cmdResponseIn
+      # Router -> ledBlinkerTcp proxy -> CmdDispatcher
+      fprimeRouter.commandOut         -> ledBlinkerTcp.seqCmdIn
+      ledBlinkerTcp.seqCmdStatusOut   -> fprimeRouter.cmdResponseIn
       fprimeRouter.fileOut     -> fileUplink.bufferSendIn
       fileUplink.bufferSendOut -> fprimeRouter.fileBufferReturnIn
     }
 
     connections CDHDeployment {
-      # Uplink: USBSoundCard (KISS RX) -> AMSATDeframer -> CmdDispatcher
-      usbSoundCard.ax25Out    -> amsatDeframer.dataIn
-      amsatDeframer.comOut    -> cmdDisp.seqCmdBuff
-      cmdDisp.seqCmdStatus    -> amsatDeframer.cmdResponseIn
+      # Uplink: USBSoundCard (KISS RX) -> AMSATDeframer -> ledBlinkerRf proxy -> CmdDispatcher
+      usbSoundCard.ax25Out            -> amsatDeframer.dataIn
+      amsatDeframer.comOut            -> ledBlinkerRf.seqCmdIn
+      ledBlinkerRf.seqCmdStatusOut    -> amsatDeframer.cmdResponseIn
+    }
+
+    connections LedBlinker {
+      ledBlinkerTcp.seqCmdOut          -> cmdDisp.seqCmdBuff
+      ledBlinkerRf.seqCmdOut           -> cmdDisp.seqCmdBuff
+      cmdDisp.seqCmdStatus             -> ledBlinkerTcp.seqCmdStatusIn
+      cmdDisp.seqCmdStatus             -> ledBlinkerRf.seqCmdStatusIn
+      rateGroup1.RateGroupMemberOut[5] -> ledBlinkerTcp.schedIn
+      rateGroup1.RateGroupMemberOut[6] -> ledBlinkerRf.schedIn
     }
 
     connections RadioBridge {
