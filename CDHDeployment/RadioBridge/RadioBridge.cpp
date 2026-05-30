@@ -89,8 +89,8 @@ bool RadioBridge::transmitAX25Frame(const U8* data, FwSizeType size) {
         return false;
     }
 
-    // Transmit via rpitx on GPIO 4 at 434.9 MHz
-    ret = system("rpitx -m RF -i /tmp/fprime_telem.wav -f 434900000 -s 44100 2>/dev/null");
+    // Transmit via rpitx on GPIO 4 at 434.9 MHz. rpitx -f takes kHz.
+    ret = system("rpitx -m RF -i /tmp/fprime_telem.wav -f 434900 -s 44100 2>/dev/null");
     if (ret != 0) {
         printf("[RadioBridge] rpitx failed (exit %d)\n", ret);
         return false;
