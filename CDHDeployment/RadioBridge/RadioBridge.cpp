@@ -158,7 +158,7 @@ bool RadioBridge::transmitAX25Frame(const U8* data, FwSizeType size) {
         "csdr convert_i16_f | "
         "csdr gain_ff 7000 | "
         "csdr convert_f_samplerf 20833 | "
-        "sudo /usr/local/bin/rpitx -i- -m RF -f 434.9e6 > /dev/null 2>&1";
+        "sudo /usr/bin/rpitx -i- -m RF -f 434900 > /dev/null 2>&1";
 
     printf("Transmitting RF on 434.9 MHz via GPIO pin 4...\n");
     printf("Command: %s\n", txCmd.c_str());

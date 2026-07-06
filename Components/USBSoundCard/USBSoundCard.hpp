@@ -28,10 +28,7 @@ PRIVATE:
   void START_CAPTURE_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) override;
   void STOP_CAPTURE_cmdHandler(FwOpcodeType opCode, U32 cmdSeq) override;
 
-
   void run_handler(FwIndexType portNum, U32 context) override;
-
-PRIVATE:
   bool m_captureActive;
 
   void initializeKissRxBuffer();
@@ -41,6 +38,8 @@ PRIVATE:
   void readKissData();
 
   void processKissFrame(const U8* data, FwSizeType size);
+
+  static constexpr FwSizeType KISS_RX_BUFFER_SIZE = 1024;
 
   int m_kissSockFd;
   bool m_kissConnected;

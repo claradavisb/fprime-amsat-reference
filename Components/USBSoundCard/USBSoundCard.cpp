@@ -182,7 +182,7 @@ void USBSoundCard::processKissFrame(const U8* data, FwSizeType size) {
         return;
     }
 
-    if (size > m_kissRxBuffer.getSize()) {
+    if (size > KISS_RX_BUFFER_SIZE) {
         printf("[KISS] Frame too large (%lu bytes), dropping\n", size);
         return;
     }
